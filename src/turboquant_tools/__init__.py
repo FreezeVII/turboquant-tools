@@ -1,8 +1,6 @@
-"""
-turboquant_tools — CLI + MCP Server + Library for TurboQuant embedding compression.
-"""
+"""TurboQuant Tools — CLI + MCP Server + Python Library for embedding compression."""
 
-from .core import compress, decompress, estimate_savings
-from .core import CompressedVectors, MemoryBytes
+from turboquant_tools.core import compress, decompress, estimate_savings, CompressedVectors
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
+__all__ = ["compress", "decompress", "estimate_savings", "CompressedVectors"]
