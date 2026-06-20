@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "turboquant-tools"
+version = "0.1.0"
+description = "CLI + MCP Server + Python Library for TurboQuant-based embedding compression"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [{name = "FreezeVII"}]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "numpy>=1.24",
+    "click>=8.0",
+    "torch>=2.0",
+    "turboquant>=0.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/FreezeVII/turboquant-tools"
+Source = "https://github.com/FreezeVII/turboquant-tools"
+
+[project.scripts]
+turboquant = "turboquant_tools.cli:main"
+
+[project.optional-dependencies]
+mcp = ["fastmcp>=0.1"]
+faiss = ["faiss-cpu>=1.7"]
+dev = ["pytest>=7", "pytest-cov"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
