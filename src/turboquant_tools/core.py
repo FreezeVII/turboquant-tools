@@ -68,52 +68,27 @@ class CompressedVectors:
         )
 
 
-# ── Walsh-Hadamard Transform (fast, in-place) ─────────────────────────────
+# ── Walsh-Hadamard Transform (iterative, in-place) ────────────────────────
 
 def _fwht(x: np.ndarray) -> np.ndarray:
     """Fast Walsh-Hadamard Transform on last axis. x.shape = (n, d), d must be power of 2."""
     n, d = x.shape
     h = 1
     while h < d:
-        half = h
-        step = h * 2
-        for i in range(0, d, step):
-            j_end = i + half
-            for j in range(i, j_end):
+        for i in range(0, d, h * 2):
+            for j in range(i, i + h):
                 u = x[:, j].copy()
-                v = x[:, j + half].copy()
+                v = x[:, j + h].copy()
                 x[:, j] = u + v
-                x[:, j + half] = u - v
-        h = step
-    return x
-
-
-def _random_hadamard_matrix(d: int, seed: int = 42) -> np.ndarray:
-    """Generate random rotation matrix as D @ H, where D is random diagonal ±1."""
-    rng = np.random.RandomState(seed)
-    diag = rng.choice([-1.0, 1.0], size=d)
-    # Apply transform to diag to get a randomized Hadamard
-    diag_2d = diag.reshape(1, d).copy()
-    _fwht(diag_2d)
-    return diag_2d[0] / math.sqrt(d)
-
-
-def _rotate(x: np.ndarray, seed: int = 42) -> np.ndarray:
-    """Apply randomized Hadamard rotation: x @ (D @ H) / sqrt(d)."""
-    n, d = x.shape
-    rng = np.random.RandomState(seed)
-    diag = rng.choice([-1.0, 1.0], size=d).astype(np.float32)
-    # x = x * diag  (element-wise on each row)
-    x = x * diag[None, :]
-    _fwht(x)
-    x /= math.sqrt(d)
+                x[:, j + h] = u - v
+        h *= 2
     return x
 
 
 # ── Codebook ───────────────────────────────────────────────────────────────
 
 def _make_codebook(bits: int, seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
-    """Generate scalar codebook: boundaries + centroids."""
+    """Generate scalar codebook: boundaries + centroids from normal samples."""
     K = 2 ** bits
     n_bins = max(100000, K * 100)
     rng = np.random.RandomState(seed)
@@ -127,14 +102,6 @@ def _make_codebook(bits: int, seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
         centroids[k] = samples[mask].mean() if mask.sum() > 0 else 0.0
         prev = nxt
     return boundaries.astype(np.float32), centroids.astype(np.float32)
-
-
-def _quantize(x: np.ndarray, boundaries: np.ndarray, centroids: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Scalar quantize values to indices, return (indices, reconstructed)."""
-    # For each value, find which bin it falls into
-    indices = np.searchsorted(boundaries, x.ravel()).astype(np.uint8)
-    reconstructed = centroids[indices].reshape(x.shape)
-    return indices, reconstructed
 
 
 # ── Public API ─────────────────────────────────────────────────────────────
@@ -157,7 +124,7 @@ def compress(vectors: np.ndarray, bits: int = 3, use_qjl: bool = False, seed: in
         warnings.warn("QJL not available in numpy-only mode. Falling back to PolarQuant.")
 
     n, d = vectors.shape
-    arr = vectors.astype(np.float32, copy=True)
+    arr = np.ascontiguousarray(vectors, dtype=np.float32)
 
     # Pad to next power of 2 for FWHT
     d_padded = 1 << (d - 1).bit_length()
@@ -166,18 +133,21 @@ def compress(vectors: np.ndarray, bits: int = 3, use_qjl: bool = False, seed: in
         padded[:, :d] = arr
         arr = padded
 
-    # Rotate
-    rotated = _rotate(arr, seed=seed)
+    # Random rotation: arr *= diag, then FWHT, then / sqrt(d)
+    rng = np.random.RandomState(seed)
+    diag = rng.choice([-1.0, 1.0], size=d_padded).astype(np.float32)
+    arr *= diag[None, :]
+    _fwht(arr)
+    arr /= math.sqrt(d_padded)
 
     # Split into norm + direction
-    norm = np.linalg.norm(rotated, axis=1, keepdims=True)
-    # Avoid division by zero
+    norm = np.linalg.norm(arr, axis=1, keepdims=True)
     norm_safe = np.where(norm > 0, norm, 1.0)
-    direction = rotated / norm_safe
+    direction = arr / norm_safe
 
     # Quantize direction components
     boundaries, centroids = _make_codebook(bits, seed=0)
-    indices_flat, _ = _quantize(direction, boundaries, centroids)
+    indices_flat = np.searchsorted(boundaries, direction.ravel()).astype(np.uint8)
     indices = indices_flat.reshape(n, d_padded)
 
     # Serialize
@@ -212,7 +182,7 @@ def decompress(compressed: CompressedVectors) -> np.ndarray:
         (n, d) float32 numpy array.
     """
     data = compressed.data
-    magic, fmt_type, bits, seed, n, d, d_padded, pq_norm_len, qjl_norm_len = struct.unpack_from(
+    magic, fmt_type, bits, seed, n, d, d_padded, pq_norm_len, _ = struct.unpack_from(
         "<4s B B I I I I I I", data, 0
     )
     assert magic == b"TQT2", f"Invalid magic: {magic}"
@@ -227,16 +197,14 @@ def decompress(compressed: CompressedVectors) -> np.ndarray:
     direction = centroids[pq_indices.astype(np.int32)]
 
     # Apply norm
-    norm_2d = pq_norm[:, None]
-    restored = direction * norm_2d
+    restored = direction * pq_norm[:, None]
 
-    # Inverse rotation
+    # Inverse rotation: diag * FWHT * sqrt(d)
     rng = np.random.RandomState(seed)
     diag = rng.choice([-1.0, 1.0], size=d_padded).astype(np.float32)
-    # Inverse FWHT: same as forward because H^-1 = H / d
     _fwht(restored)
     restored *= math.sqrt(d_padded)
-    restored = restored * diag[None, :]
+    restored *= diag[None, :]
 
     # Unpad
     if d_padded != d:
@@ -258,10 +226,10 @@ def estimate_savings(n_vectors: int, dim: int, bits: int = 3) -> MemoryBytes:
         MemoryBytes with original/compressed sizes and ratio.
     """
     d_padded = 1 << (dim - 1).bit_length()
-    # Per vector: norm (float16) + indices (uint8 * d_padded) + header overhead / n
-    bytes_per = 2 + d_padded + 32  # 32 bytes header amortized
-    # more accurate: compute raw sizes
+    # Per vector: norm (2 bytes float16) + indices (d_padded bytes uint8) + header share
+    header_size = 32
+    per_vector = 2 + d_padded
     original = n_vectors * dim * 4
-    compressed = n_vectors * bytes_per + 32
+    compressed = n_vectors * per_vector + header_size
     ratio = original / compressed if compressed > 0 else 1.0
     return MemoryBytes(original=original, compressed=int(compressed), ratio=ratio)
