@@ -75,7 +75,7 @@ class TestEstimateSavings:
         c = compress(vecs, bits=3)
         est = estimate_savings(n, d, bits=3)
         assert c.memory.ratio > 1.0
-        assert est.ratio > c.memory.ratio  # estimate is upper bound
+        assert est.ratio >= c.memory.ratio  # estimate is theoretical max
 
     def test_estimate_str(self):
         est = estimate_savings(100, 384, bits=3)
