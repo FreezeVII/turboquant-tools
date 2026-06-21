@@ -5,29 +5,33 @@ Tests for MCP server tool functions (called directly, not over stdio).
 import numpy as np
 import pytest
 
+from turboquant_tools.mcp_server import _serve_stdio
 from turboquant_tools import compress, decompress
 
 
 def test_compress_embeddings_tool():
-    """Test compress_embeddings logic via direct function calls."""
-    import base64, struct
-    from turboquant_tools.core import CompressedVectors
+    """Test compress_embeddings logic via direct function call."""
+    from turboquant_tools.mcp_server import _serve_stdio
+    import base64
 
     vecs = np.random.randn(10, 128).astype(np.float32)
-    c = compress(vecs, bits=3)
+    c = compress(vecs, bits=3, use_qjl=False)
 
     b64 = base64.b64encode(c.data).decode()
     assert isinstance(b64, str)
     assert len(b64) > 0
 
     data = base64.b64decode(b64)
+    from turboquant_tools.core import CompressedVectors
+    import struct
     magic = struct.unpack_from("<4s", data, 0)[0]
     assert magic == b"TQT2"
 
     cv = CompressedVectors(data=data, shape=(10, 128), bits=3)
     r = decompress(cv)
     assert r.shape == (10, 128)
-    assert np.isfinite(np.abs(vecs - r).mean())
+    err = np.abs(vecs - r).mean()
+    assert np.isfinite(err)
 
 
 def test_estimate_savings_tool():
@@ -41,8 +45,8 @@ def test_estimate_savings_tool():
         "saved_percent": round(est.saved_percent, 1),
     }
     assert result["original_mb"] == 153.60
-    assert result["ratio"] > 1.0
-    assert result["saved_percent"] > 0
+    assert result["ratio"] > 3.0
+    assert result["saved_percent"] > 60
 
 
 def test_mcp_tool_registration():
