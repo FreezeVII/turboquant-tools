@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "turboquant-tools"
-version = "0.1.1"
+version = "0.1.2"
 description = "CLI + MCP Server + Python Library for TurboQuant-based embedding compression"
 readme = "README.md"
 license = {text = "MIT"}
@@ -17,6 +17,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
+
 dependencies = [
     "numpy>=1.24",
     "click>=8.0",
